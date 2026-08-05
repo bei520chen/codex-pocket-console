@@ -1,0 +1,10 @@
+﻿.runtime/
+.tmp/
+.vs/
+**/bin/
+**/obj/
+**/node_modules/
+**/*.csproj.user
+src/PocketConsole.Api/data/
+src/PocketConsole.Api/wwwroot/
+src/PocketConsole.Web/*.tsbuildinfo
