@@ -6,6 +6,8 @@ import { connectRealtime } from "./realtime";
 import ProjectGrid from "./components/ProjectGrid.vue";
 import SessionList from "./components/SessionList.vue";
 import TaskList from "./components/TaskList.vue";
+import MessageContent from "./components/MessageContent.vue";
+import ToolActivity from "./components/ToolActivity.vue";
 import type { HostStatus, PocketTask, Project, Session, SessionDetail, ThreadItem, UploadedAttachment } from "./types";
 
 type Tab = "home" | "tasks" | "projects" | "history" | "settings";
@@ -789,28 +791,30 @@ function statusName(status: string) {
           <button v-if="hasEarlierSessionTurns" class="load-earlier" type="button" @click="loadEarlierSessionTurns">加载更早对话</button>
           <template v-for="turn in visibleSessionTurns" :key="turn.id">
             <template v-for="item in turn.items" :key="item.id">
-              <article v-if="itemText(item)" :class="['timeline-entry', timelineKind(item), itemStatus(item)]">
-                <div class="entry-heading">
+              <article v-if="itemText(item) && ['user', 'agent'].includes(timelineKind(item))" :class="['timeline-entry', timelineKind(item), itemStatus(item)]">
+                <div v-if="timelineKind(item) === 'user'" class="entry-heading">
                   <span class="entry-icon">{{ timelineKind(item) === 'user' ? '↗' : timelineKind(item) === 'agent' ? '⌁' : timelineKind(item) === 'reasoning' ? '◌' : timelineKind(item) === 'command' ? '›_' : timelineKind(item) === 'file' ? '±' : timelineKind(item) === 'mcp' ? 'M' : '◇' }}</span>
                   <div><strong>{{ timelineLabel(item) }}</strong><small v-if="timelineTitle(item)">{{ timelineTitle(item) }}</small></div>
                   <span v-if="itemStatus(item) === 'running'" class="entry-status running">运行中</span>
                   <span v-else-if="itemStatus(item) === 'failed'" class="entry-status failed">失败</span>
                 </div>
-                <pre v-if="!['user', 'agent'].includes(timelineKind(item))">{{ itemText(item) }}</pre>
-                <p v-else>{{ itemText(item) }}</p>
+                <MessageContent :text="itemText(item)" />
               </article>
+              <ToolActivity v-else-if="itemText(item)" :kind="timelineKind(item)" :label="timelineLabel(item)" :title="timelineTitle(item)" :text="itemText(item)" :status="itemStatus(item)" />
             </template>
           </template>
-          <article v-for="item in liveItems" :key="item.id" :class="['timeline-entry', item.kind, item.status, 'live']">
-            <div class="entry-heading">
+          <template v-for="item in liveItems" :key="item.id">
+          <article v-if="['user', 'agent'].includes(item.kind)" :class="['timeline-entry', item.kind, item.status, 'live']">
+            <div v-if="item.kind === 'user'" class="entry-heading">
               <span class="entry-icon">{{ item.kind === 'user' ? '↗' : item.kind === 'agent' ? '⌁' : item.kind === 'reasoning' ? '◌' : item.kind === 'command' ? '›_' : item.kind === 'file' ? '±' : item.kind === 'mcp' ? 'M' : '◇' }}</span>
               <div><strong>{{ item.label }}</strong><small v-if="item.title">{{ item.title }}</small></div>
               <span v-if="item.status === 'running'" class="entry-status running"><i />运行中</span>
               <span v-else-if="item.status === 'failed'" class="entry-status failed">失败</span>
             </div>
-            <pre v-if="!['user', 'agent'].includes(item.kind)">{{ item.text || '正在处理…' }}</pre>
-            <p v-else>{{ item.text }}<i v-if="item.kind === 'agent' && item.status === 'running'" class="stream-cursor" /></p>
+            <MessageContent :text="item.text" :streaming="item.kind === 'agent' && item.status === 'running'" />
           </article>
+          <ToolActivity v-else :kind="item.kind" :label="item.label" :title="item.title" :text="item.text" :status="item.status" />
+          </template>
           <div v-if="sessionContentLoading" class="empty">正在加载会话内容…</div><div v-else-if="!selected.thread.turns.length && !liveItems.length" class="empty">没有可展示的会话内容</div>
         </div>
         <form class="session-composer" @submit.prevent="sendSessionMessage">
