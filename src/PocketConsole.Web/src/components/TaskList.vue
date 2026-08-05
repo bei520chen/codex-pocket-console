@@ -16,7 +16,7 @@ function statusName(status: string) {
       <div class="task-top"><span :class="['task-status', task.status]">{{ statusName(task.status) }}</span><small>{{ new Date(task.updatedAt).toLocaleDateString('zh-CN') }}</small></div>
       <strong>{{ task.title }}</strong><p>{{ task.prompt }}</p><small class="path">{{ task.projectPath || '暂未关联项目' }}</small>
       <div class="task-actions">
-        <button v-if="!task.projectPath" class="secondary" @click="$emit('associate', task)">????</button>
+        <button v-if="!task.projectPath" class="secondary" @click="$emit('associate', task)">关联项目</button>
         <button v-if="['draft', 'queued', 'failed', 'cancelled', 'completed'].includes(task.status)" @click="$emit('control', task, 'start')">{{ task.threadId ? '再次执行原任务' : '开始任务' }}</button>
         <button v-if="task.status === 'running'" @click="$emit('control', task, 'interrupt')">停止</button>
       </div>

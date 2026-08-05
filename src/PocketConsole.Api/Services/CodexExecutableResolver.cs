@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Options;
 using PocketConsole.Api.Options;
 
 namespace PocketConsole.Api.Services;
@@ -12,15 +12,17 @@ public sealed class CodexExecutableResolver(IOptions<CodexOptions> options)
             return Path.GetFullPath(Environment.ExpandEnvironmentVariables(options.Value.ExecutablePath));
         }
 
-        var pathExecutable = ResolveFromPath();
-        if (!string.IsNullOrWhiteSpace(pathExecutable)) return pathExecutable;
-
         var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenAI", "Codex", "bin");
-        return Directory.Exists(root)
-            ? Directory.EnumerateFiles(root, "codex.exe", SearchOption.AllDirectories).OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault() ?? "codex"
-            : "codex";
-    }
+        if (Directory.Exists(root))
+        {
+            var localExecutable = Directory.EnumerateFiles(root, "codex.exe", SearchOption.AllDirectories)
+                .OrderByDescending(File.GetLastWriteTimeUtc)
+                .FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(localExecutable)) return localExecutable;
+        }
 
+        return ResolveFromPath() ?? "codex";
+    }
     private static string? ResolveFromPath()
     {
         var path = Environment.GetEnvironmentVariable("Path");

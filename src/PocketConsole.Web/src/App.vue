@@ -37,6 +37,8 @@ const openingSessionId = ref<string | null>(null);
 const sessionContentLoading = ref(false);
 let sessionContentRequest = 0;
 const search = ref("");
+const searchInput = ref<HTMLInputElement | null>(null);
+const featureNotice = ref("");
 const activeSearch = ref("");
 const selectedProject = ref<Project | null>(null);
 const loading = ref(true);
@@ -81,7 +83,18 @@ const visibleSessionTurns = computed(() => {
   return turns.slice(Math.max(0, turns.length - displayedTurnCount.value));
 });
 const hasEarlierSessionTurns = computed(() => (selected.value?.thread.turns.length || 0) > displayedTurnCount.value);
-
+const runningTasks = computed(() => tasks.value.filter(task => task.status === "running"));
+const completedTasks = computed(() => tasks.value.filter(task => task.status === "completed"));
+const activeSessions = computed(() => sessions.value.slice(0, 4));
+const recentActivities = computed(() => [
+  ...tasks.value.map(task => ({ id: "task-" + task.id, kind: "task" as const, title: task.title, timestamp: new Date(task.updatedAt).getTime(), task })),
+  ...sessions.value.map(session => ({ id: "session-" + session.id, kind: "session" as const, title: session.title, timestamp: session.updatedAt * 1000, session }))
+].sort((left, right) => right.timestamp - left.timestamp).slice(0, 5));
+const projectHealth = computed(() => projects.value.slice(0, 6).map(project => {
+  const ageDays = Math.max(0, (Date.now() - project.lastActiveAt * 1000) / 86_400_000);
+  const score = Math.max(35, Math.min(100, Math.round(92 - ageDays * 3 + Math.min(project.sessionCount, 8))));
+  return { project, score, state: score >= 80 ? "healthy" : score >= 60 ? "warning" : "critical", label: score >= 80 ? "健康" : score >= 60 ? "注意" : "较少活动" };
+}));
 onMounted(async () => {
   try { authenticated.value = (await api.authStatus()).authenticated; }
   finally { authReady.value = true; }
@@ -214,8 +227,21 @@ async function loadEarlierSessionTurns() {
 
 function handleGlobalKeydown(event: KeyboardEvent) {
   if (event.key === "Escape" && selected.value) closeSession();
+  if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "k") {
+    event.preventDefault();
+    if (tab.value !== "home" && tab.value !== "history") tab.value = "home";
+    void nextTick(() => searchInput.value?.focus());
+  }
 }
 
+function showFeatureNotice(feature: string) {
+  featureNotice.value = feature + "尚未接入后端能力，当前版本先保留入口。";
+}
+
+function openActivity(activity: (typeof recentActivities.value)[number]) {
+  if (activity.kind === "session") void openSession(activity.session.id);
+  else tab.value = "tasks";
+}
 onMounted(() => window.addEventListener("keydown", handleGlobalKeydown));
 onUnmounted(() => window.removeEventListener("keydown", handleGlobalKeydown));
 
@@ -595,7 +621,7 @@ function statusName(status: string) {
   <div v-if="authReady && !authenticated" class="login-shell">
     <section class="login-card">
       <div class="login-mark">⌁</div>
-      <span class="eyebrow">PRIVATE CODEX</span>
+      <span class="eyebrow">CODEX 移动控制台</span>
       <h1>Codex 工作台</h1>
       <p>输入启动脚本生成的访问密码。</p>
       <form @submit.prevent="login">
@@ -607,32 +633,88 @@ function statusName(status: string) {
   </div>
   <div v-else-if="!authReady" class="login-shell"><div class="empty">正在检查登录状态…</div></div>
   <div v-else class="app-shell">
+    <aside class="workspace-sidebar">
+      <div class="brand"><span class="brand-mark">⌁</span><strong>Codex</strong></div>
+      <nav class="side-nav" aria-label="主要导航">
+        <button :class="{ active: tab === 'home' }" @click="tab = 'home'"><span>▦</span><strong>工作台</strong></button>
+        <button :class="{ active: tab === 'projects' }" @click="tab = 'projects'"><span>□</span><strong>项目</strong></button>
+        <button :class="{ active: tab === 'history' }" @click="tab = 'history'"><span>◷</span><strong>对话</strong><small>{{ sessions.length }}</small></button>
+        <button :class="{ active: tab === 'tasks' }" @click="tab = 'tasks'"><span>✓</span><strong>任务</strong><small>{{ tasks.length }}</small></button>
+      </nav>
+      <div class="side-label">开发</div>
+      <nav class="side-nav side-nav-muted">
+        <button @click="showFeatureNotice('智能体')"><span>◉</span><strong>智能体</strong><small>待接入</small></button>
+        <button @click="showFeatureNotice('终端')"><span>›_</span><strong>终端</strong></button>
+        <button @click="showFeatureNotice('Git 中心')"><span>⑂</span><strong>Git 中心</strong></button>
+        <button @click="showFeatureNotice('文件管理')"><span>▤</span><strong>文件</strong></button>
+      </nav>
+      <div class="side-label">平台</div>
+      <nav class="side-nav side-nav-muted">
+        <button @click="showFeatureNotice('MCP 服务')"><span>◔</span><strong>MCP 服务</strong></button>
+        <button @click="showFeatureNotice('技能市场')"><span>☆</span><strong>技能市场</strong></button>
+        <button @click="showFeatureNotice('自动化')"><span>ϟ</span><strong>自动化</strong></button>
+      </nav>      <div class="side-label">系统</div>
+      <nav class="side-nav">
+        <button :class="{ active: tab === 'settings' }" @click="tab = 'settings'"><span>⚙</span><strong>设置</strong></button>
+      </nav>
+      <div class="workspace-profile"><span>北</span><div><strong>个人工作区</strong><small>移动控制台</small></div></div>
+    </aside>
+
     <header class="topbar">
-      <div><span class="eyebrow">PRIVATE WORKSPACE</span><h1>Codex 工作台</h1></div>
-      <button class="status-pill" @click="refresh"><span :class="['dot', host?.connected && 'online']" />{{ host?.connected ? '在线' : '离线' }}</button>
+      <div class="topbar-title"><span class="eyebrow">CODEX 工作空间</span><h1>{{ tab === 'home' ? '工作台' : tab === 'projects' ? '项目' : tab === 'history' ? '对话' : tab === 'tasks' ? '任务' : '设置' }}</h1></div>
+      <form v-if="tab === 'home' || tab === 'history'" class="top-search" @submit.prevent="performSearch">
+        <span>⌕</span><input ref="searchInput" v-model="search" placeholder="搜索或输入命令…"><button type="submit" :disabled="searching">{{ searching ? '搜索中' : '搜索' }}</button>
+      </form>
+      <button class="status-pill" @click="refresh"><span :class="['dot', host?.connected && 'online']" />{{ host?.connected ? 'Codex 在线' : 'Codex 离线' }}</button>
     </header>
 
     <main>
-      <form v-if="tab === 'home' || tab === 'history'" class="search" @submit.prevent="performSearch">
-        <span>&#8981;</span><input v-model="search" placeholder="&#25628;&#32034;&#39033;&#30446;&#25110;&#20250;&#35805;"><button type="submit" :disabled="searching">{{ searching ? '????' : '??' }}</button>
-      </form>
+      <div v-if="featureNotice" class="feature-notice"><span>{{ featureNotice }}</span><button @click="featureNotice = ''">×</button></div>
       <div v-if="activeSearch && (tab === 'home' || tab === 'history')" class="search-summary"><span>&#20851;&#38190;&#35789; {{ activeSearch }}&#65306;&#25214;&#21040; {{ searchResultCount }} &#26465;&#32467;&#26524;</span><button @click="clearSearch">&#28165;&#38500;</button></div>
       <div v-if="error" class="error-card">{{ error }}</div>
 
       <template v-if="tab === 'home'">
-        <section class="hero"><div><span class="eyebrow">TODAY</span><h2>今天想继续什么？</h2><p>任务是你的工作目标，thread 是 Codex 的执行会话。</p></div><div class="hero-orb">⌁</div></section>
-        <section class="quick-grid">
-          <button class="action-card accent" @click="openCreateMenu"><span class="action-icon">&#65291;</span><strong>&#26032;&#24314;</strong><small>&#23545;&#35805;&#12289;&#20219;&#21153;&#25110;&#39033;&#30446;</small></button>
-          <button class="action-card" @click="tab = 'history'"><span class="action-icon">◷</span><strong>继续会话</strong><small>{{ sessions.length }} 个历史会话</small></button>
+        <section class="hero dashboard-heading"><div><h2>工作台</h2><p>欢迎回来，这是你的工作空间概览</p></div><button class="hero-create" @click="openCreateMenu">＋ 新建</button></section>
+        <section class="metrics-grid">
+          <article class="metric-card green"><span>运行中的任务</span><strong>{{ runningTasks.length }}</strong><small>实时同步任务状态</small></article>
+          <article class="metric-card blue"><span>已完成任务</span><strong>{{ completedTasks.length }}</strong><small>共 {{ tasks.length }} 个任务</small></article>
+          <article class="metric-card violet"><span>历史对话</span><strong>{{ sessions.length }}</strong><small>{{ projects.length }} 个项目工作区</small></article>
+          <article class="metric-card amber"><span>Codex 状态</span><strong>{{ host?.connected ? '在线' : '离线' }}</strong><small>{{ host?.codexVersion || '正在连接' }}</small></article>
         </section>
-        <div class="section-title"><h3>最近任务</h3><button @click="tab = 'tasks'">查看全部 →</button></div>
-        <TaskList :items="recentTasks" @control="controlTask" @associate="openTaskAssociation" />
-        <div class="section-title"><h3>最近项目</h3><button @click="tab = 'projects'">查看全部 →</button></div>
-        <ProjectGrid :items="filteredProjects.slice(0, 6)" @open="openProject" />
-        <div class="section-title"><h3>最近会话</h3><button @click="tab = 'history'">历史 →</button></div>
-        <SessionList :items="visibleSessions" :loading="loading" :opening-id="openingSessionId" @open="openSession" />
+        <section class="dashboard-grid">
+          <article class="dashboard-panel active-panel">
+            <header><h3>活跃会话</h3><button @click="tab = 'history'">查看全部</button></header>
+            <div v-if="loading" class="panel-empty">正在读取 Codex 历史…</div>
+            <div v-else-if="!activeSessions.length" class="panel-empty">暂无历史会话</div>
+            <button v-for="session in activeSessions" v-else :key="session.id" class="active-session-row" @click="openSession(session.id)">
+              <span :class="['activity-dot', session.status]" />
+              <div><strong>{{ session.title }}</strong><small>{{ session.projectName }} · {{ timeAgo(session.updatedAt) }}</small></div>
+              <em>{{ session.status === 'active' || session.status === 'running' ? '运行中' : '可继续' }}</em>
+            </button>
+          </article>
+          <article class="dashboard-panel activity-panel">
+            <header><h3>最近动态</h3><button @click="refresh">刷新</button></header>
+            <div v-if="!recentActivities.length" class="panel-empty">暂无动态</div>
+            <button v-for="activity in recentActivities" v-else :key="activity.id" class="activity-row" @click="openActivity(activity)">
+              <span>{{ timeAgo(Math.floor(activity.timestamp / 1000)) }}</span>
+              <i :class="activity.kind" />
+              <div><strong>{{ activity.kind === 'session' ? 'Codex 对话' : '任务' }}</strong><p>{{ activity.title }}</p></div>
+            </button>
+          </article>
+        </section>
+        <article class="dashboard-panel health-panel">
+          <header><h3>项目健康度</h3><div class="health-legend"><span><i class="healthy" />健康</span><span><i class="warning" />注意</span><span><i class="critical" />较少活动</span></div></header>
+          <div v-if="!projectHealth.length" class="panel-empty">暂无项目</div>
+          <div v-else class="health-grid">
+            <button v-for="item in projectHealth" :key="item.project.id" class="health-card" @click="openProject(item.project)">
+              <div><strong>{{ item.project.name }}</strong><span :class="item.state">{{ item.label }}</span></div>
+              <p>{{ item.project.sessionCount }} 个会话 · {{ timeAgo(item.project.lastActiveAt) }}</p>
+              <div class="health-progress"><i :class="item.state" :style="{ width: item.score + '%' }" /></div>
+              <small>{{ item.score }}% 活跃度</small>
+            </button>
+          </div>
+        </article>
       </template>
-
       <template v-else-if="tab === 'tasks'">
         <div class="page-heading row-heading"><div><h2>任务</h2><p>独立于 thread 的工作目标</p></div><button class="primary-button" @click="openCreateMenu">＋ 新建</button></div>
         <TaskList :items="tasks" @control="controlTask" @associate="openTaskAssociation" />
